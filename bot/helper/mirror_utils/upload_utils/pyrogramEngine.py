@@ -126,13 +126,9 @@ class TgUploader:
                 else:
                     notMedia = True
             if self.__as_doc or notMedia:
-                if file_.upper().endswith(VIDEO_SUFFIXES) and thumb is None:
-                    thumb = take_ss(up_path)
-                    if self.__is_cancelled:
-                        if self.__thumb is None and thumb is not None and ospath.lexists(thumb):
-                            osremove(thumb)
-                        return
-                self.__sent_msg = self.__sent_msg.reply_document(document=up_path,
+              if self.__is_cancelled:
+                return
+              self.__sent_msg = self.__sent_msg.reply_document(document=up_path,
                                                                  quote=True,
                                                                  thumb=thumb,
                                                                  caption=cap_mono,

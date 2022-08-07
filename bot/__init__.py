@@ -29,22 +29,6 @@ basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 
 LOGGER = getLogger(__name__)
 
-CONFIG_FILE_URL = environ.get('CONFIG_FILE_URL')
-try:
-    if len(CONFIG_FILE_URL) == 0:
-        raise TypeError
-    try:
-        res = rget(CONFIG_FILE_URL)
-        if res.status_code == 200:
-            with open('config.env', 'wb+') as f:
-                f.write(res.content)
-        else:
-            log_error(f"Failed to download config.env {res.status_code}")
-    except Exception as e:
-        log_error(f"CONFIG_FILE_URL: {e}")
-except:
-    pass
-
 load_dotenv('config.env', override=True)
 
 def getConfig(name: str):
@@ -75,18 +59,18 @@ except:
     TORRENT_TIMEOUT = None
 
 PORT = environ.get('PORT')
-Popen([f"gunicorn web.wserver:app --bind 0.0.0.0:{PORT}"], shell=True)
+Popen(f"gunicorn web.wserver:app --bind 0.0.0.0:{PORT}", shell=True)
 srun(["last-api", "-d", "--profile=."])
 if not ospath.exists('.netrc'):
     srun(["touch", ".netrc"])
 srun(["cp", ".netrc", "/root/.netrc"])
 srun(["chmod", "600", ".netrc"])
-trackers = check_output(["curl -Ns https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/all.txt https://ngosang.github.io/trackerslist/trackers_all_http.txt https://newtrackon.com/api/all https://raw.githubusercontent.com/hezhijie0327/Trackerslist/main/trackerslist_tracker.txt | awk '$0' | tr '\n\n' ','"], shell=True).decode('utf-8').rstrip(',')
+trackers = check_output("curl -Ns https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/all.txt https://ngosang.github.io/trackerslist/trackers_all_http.txt https://newtrackon.com/api/all https://raw.githubusercontent.com/hezhijie0327/Trackerslist/main/trackerslist_tracker.txt | awk '$0' | tr '\n\n' ','", shell=True).decode('utf-8').rstrip(',')
 if TORRENT_TIMEOUT is not None:
     with open("a2c.conf", "a+") as a:
         a.write(f"bt-stop-timeout={TORRENT_TIMEOUT}\n")
 with open("a2c.conf", "a+") as a:
-    a.write(f"bt-tracker={trackers}")
+    a.write(f"bt-tracker=[{trackers}]")
 srun(["extra-api", "--conf-path=/usr/src/app/a2c.conf"])
 alive = Popen(["python3", "alive.py"])
 sleep(0.5)
@@ -133,28 +117,28 @@ AUTHORIZED_CHATS = set()
 SUDO_USERS = set()
 AS_DOC_USERS = set()
 AS_MEDIA_USERS = set()
-EXTENTION_FILTER = set(['.torrent'])
+EXTENSION_FILTER = set()
 
 try:
     aid = getConfig('AUTHORIZED_CHATS')
-    aid = aid.split(' ')
+    aid = aid.split()
     for _id in aid:
-        AUTHORIZED_CHATS.add(int(_id))
+        AUTHORIZED_CHATS.add(int(_id.strip()))
 except:
     pass
 try:
     aid = getConfig('SUDO_USERS')
-    aid = aid.split(' ')
+    aid = aid.split()
     for _id in aid:
-        SUDO_USERS.add(int(_id))
+        SUDO_USERS.add(int(_id.strip()))
 except:
     pass
 try:
-    fx = getConfig('EXTENTION_FILTER')
+    fx = getConfig('EXTENSION_FILTER')
     if len(fx) > 0:
-        fx = fx.split(' ')
+        fx = fx.split()
         for x in fx:
-            EXTENTION_FILTER.add(x.lower())
+            EXTENSION_FILTER.add(x.strip().lower())
 except:
     pass
 try:
@@ -169,25 +153,35 @@ try:
     TELEGRAM_API = getConfig('TELEGRAM_API')
     TELEGRAM_HASH = getConfig('TELEGRAM_HASH')
 except:
-    LOGGER.error("One or more env variables missing! Exiting now")
+    log_error("One or more env variables missing! Exiting now")
     exit(1)
 
-LOGGER.info("Generating BOT_SESSION_STRING")
-app = Client(name='pyrogram', api_id=int(TELEGRAM_API), api_hash=TELEGRAM_HASH, bot_token=BOT_TOKEN, parse_mode=enums.ParseMode.HTML, no_updates=True)
-
 try:
+    IS_PREMIUM_USER = False
     USER_SESSION_STRING = getConfig('USER_SESSION_STRING')
     if len(USER_SESSION_STRING) == 0:
         raise KeyError
-    rss_session = Client(name='rss_session', api_id=int(TELEGRAM_API), api_hash=TELEGRAM_HASH, session_string=USER_SESSION_STRING, parse_mode=enums.ParseMode.HTML, no_updates=True)
+    LOGGER.info("Creating client from USER_SESSION_STRING")
+    app = Client(name='pyrogram', api_id=int(TELEGRAM_API), api_hash=TELEGRAM_HASH, session_string=USER_SESSION_STRING, parse_mode=enums.ParseMode.HTML, no_updates=True)
+    with app:
+        IS_PREMIUM_USER = app.me.is_premium
 except:
-    USER_SESSION_STRING = None
+    LOGGER.info("Creating client from BOT_TOKEN")
+    app = Client(name='pyrogram', api_id=int(TELEGRAM_API), api_hash=TELEGRAM_HASH, bot_token=BOT_TOKEN, parse_mode=enums.ParseMode.HTML, no_updates=True)
+
+try:
+    RSS_USER_SESSION_STRING = getConfig('RSS_USER_SESSION_STRING')
+    if len(RSS_USER_SESSION_STRING) == 0:
+        raise KeyError
+    LOGGER.info("Creating client from RSS_USER_SESSION_STRING")
+    rss_session = Client(name='rss_session', api_id=int(TELEGRAM_API), api_hash=TELEGRAM_HASH, session_string=RSS_USER_SESSION_STRING, parse_mode=enums.ParseMode.HTML, no_updates=True)
+except:
     rss_session = None
 
 def aria2c_init():
     try:
         log_info("Initializing Aria2c")
-        link = "https://releases.ubuntu.com/21.10/ubuntu-21.10-desktop-amd64.iso.torrent"
+        link = "https://linuxmint.com/torrents/lmde-5-cinnamon-64bit.iso.torrent"
         dire = DOWNLOAD_DIR.rstrip("/")
         aria2.add_uris([link], {'dir': dire})
         sleep(3)
@@ -241,12 +235,15 @@ try:
 except:
     DB_URI = None
 try:
-    TG_SPLIT_SIZE = getConfig('TG_SPLIT_SIZE')
-    if len(TG_SPLIT_SIZE) == 0 or int(TG_SPLIT_SIZE) > 2097151000:
+    LEECH_SPLIT_SIZE = getConfig('LEECH_SPLIT_SIZE')
+    if len(LEECH_SPLIT_SIZE) == 0 or (not IS_PREMIUM_USER and LEECH_SPLIT_SIZE > 2097152000) or LEECH_SPLIT_SIZE > 4194304000:
         raise KeyError
-    TG_SPLIT_SIZE = int(TG_SPLIT_SIZE)
+    LEECH_SPLIT_SIZE = int(LEECH_SPLIT_SIZE)
 except:
-    TG_SPLIT_SIZE = 2097151000
+    if not IS_PREMIUM_USER:
+        LEECH_SPLIT_SIZE = 2097152000
+    else:
+        LEECH_SPLIT_SIZE = 4194304000
 try:
     STATUS_LIMIT = getConfig('STATUS_LIMIT')
     if len(STATUS_LIMIT) == 0:
@@ -294,41 +291,6 @@ try:
 except:
     CMD_INDEX = ''
 try:
-    TORRENT_DIRECT_LIMIT = getConfig('TORRENT_DIRECT_LIMIT')
-    if len(TORRENT_DIRECT_LIMIT) == 0:
-        raise KeyError
-    TORRENT_DIRECT_LIMIT = float(TORRENT_DIRECT_LIMIT)
-except:
-    TORRENT_DIRECT_LIMIT = None
-try:
-    CLONE_LIMIT = getConfig('CLONE_LIMIT')
-    if len(CLONE_LIMIT) == 0:
-        raise KeyError
-    CLONE_LIMIT = float(CLONE_LIMIT)
-except:
-    CLONE_LIMIT = None
-try:
-    MEGA_LIMIT = getConfig('MEGA_LIMIT')
-    if len(MEGA_LIMIT) == 0:
-        raise KeyError
-    MEGA_LIMIT = float(MEGA_LIMIT)
-except:
-    MEGA_LIMIT = None
-try:
-    STORAGE_THRESHOLD = getConfig('STORAGE_THRESHOLD')
-    if len(STORAGE_THRESHOLD) == 0:
-        raise KeyError
-    STORAGE_THRESHOLD = float(STORAGE_THRESHOLD)
-except:
-    STORAGE_THRESHOLD = None
-try:
-    ZIP_UNZIP_LIMIT = getConfig('ZIP_UNZIP_LIMIT')
-    if len(ZIP_UNZIP_LIMIT) == 0:
-        raise KeyError
-    ZIP_UNZIP_LIMIT = float(ZIP_UNZIP_LIMIT)
-except:
-    ZIP_UNZIP_LIMIT = None
-try:
     RSS_CHAT_ID = getConfig('RSS_CHAT_ID')
     if len(RSS_CHAT_ID) == 0:
         raise KeyError
@@ -342,30 +304,6 @@ try:
     RSS_DELAY = int(RSS_DELAY)
 except:
     RSS_DELAY = 900
-try:
-    BUTTON_FOUR_NAME = getConfig('BUTTON_FOUR_NAME')
-    BUTTON_FOUR_URL = getConfig('BUTTON_FOUR_URL')
-    if len(BUTTON_FOUR_NAME) == 0 or len(BUTTON_FOUR_URL) == 0:
-        raise KeyError
-except:
-    BUTTON_FOUR_NAME = None
-    BUTTON_FOUR_URL = None
-try:
-    BUTTON_FIVE_NAME = getConfig('BUTTON_FIVE_NAME')
-    BUTTON_FIVE_URL = getConfig('BUTTON_FIVE_URL')
-    if len(BUTTON_FIVE_NAME) == 0 or len(BUTTON_FIVE_URL) == 0:
-        raise KeyError
-except:
-    BUTTON_FIVE_NAME = None
-    BUTTON_FIVE_URL = None
-try:
-    BUTTON_SIX_NAME = getConfig('BUTTON_SIX_NAME')
-    BUTTON_SIX_URL = getConfig('BUTTON_SIX_URL')
-    if len(BUTTON_SIX_NAME) == 0 or len(BUTTON_SIX_URL) == 0:
-        raise KeyError
-except:
-    BUTTON_SIX_NAME = None
-    BUTTON_SIX_URL = None
 try:
     INCOMPLETE_TASK_NOTIFIER = getConfig('INCOMPLETE_TASK_NOTIFIER')
     INCOMPLETE_TASK_NOTIFIER = INCOMPLETE_TASK_NOTIFIER.lower() == 'true'
@@ -397,14 +335,6 @@ try:
 except:
     WEB_PINCODE = False
 try:
-    SHORTENER = getConfig('SHORTENER')
-    SHORTENER_API = getConfig('SHORTENER_API')
-    if len(SHORTENER) == 0 or len(SHORTENER_API) == 0:
-        raise KeyError
-except:
-    SHORTENER = None
-    SHORTENER_API = None
-try:
     IGNORE_PENDING_REQUESTS = getConfig("IGNORE_PENDING_REQUESTS")
     IGNORE_PENDING_REQUESTS = IGNORE_PENDING_REQUESTS.lower() == 'true'
 except:
@@ -430,12 +360,6 @@ try:
         raise KeyError
 except:
     CUSTOM_FILENAME = None
-try:
-    CRYPT = getConfig('CRYPT')
-    if len(CRYPT) == 0:
-        raise KeyError
-except:
-    CRYPT = None
 try:
     TOKEN_PICKLE_URL = getConfig('TOKEN_PICKLE_URL')
     if len(TOKEN_PICKLE_URL) == 0:

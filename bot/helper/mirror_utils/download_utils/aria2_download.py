@@ -76,6 +76,7 @@ def __onDownloadComplete(api, gid):
         dl = getDownloadByGid(new_gid)
         listener = dl.listener()
         if BASE_URL is not None and listener.select:
+            api.client.force_pause(new_gid)
             SBUTTONS = bt_selection_buttons(new_gid)
             msg = "Your download paused. Choose files then press Done Selecting button to start downloading."
             sendMarkup(msg, listener.bot, listener.message, SBUTTONS)
